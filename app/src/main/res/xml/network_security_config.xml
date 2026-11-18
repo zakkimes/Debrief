@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The GoPro serves its media over plain HTTP on its own Wi-Fi (10.5.5.9); everything else stays HTTPS-only. -->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">10.5.5.9</domain>
+    </domain-config>
+</network-security-config>

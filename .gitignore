@@ -1,0 +1,14 @@
+.gradle/
+build/
+local.properties
+.idea/
+*.iml
+captures/
+pulled/
+.claude/
+trackside/
+
+# Signing key and anything with real session data stay off GitHub
+*.jks
+*.keystore
+keystore.properties
