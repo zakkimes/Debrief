@@ -3,7 +3,12 @@ package com.kimes.daq.ui
 import android.media.MediaPlayer
 import android.net.Uri
 import android.widget.VideoView
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.drag
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.aspectRatio
@@ -135,7 +140,8 @@ private fun nearestByUtc(ss: List<Sample>, utc: Long): Int? {
 private var videoSound by androidx.compose.runtime.mutableStateOf(true)
 
 @Composable
-fun InlineVideo(link: VideoLink, fromUtc: Long, toUtc: Long?, modifier: Modifier, seekUtc: Long? = null, onFullScreen: (() -> Unit)? = null, atUtc: (Long) -> Unit = {}) {
+fun InlineVideo(link: VideoLink, fromUtc: Long, toUtc: Long?, modifier: Modifier, seekUtc: Long? = null, onFullScreen: (() -> Unit)? = null, endUtc: Long? = null, atUtc: (Long) -> Unit = {}) {
+    val onAt by androidx.compose.runtime.rememberUpdatedState(atUtc)
     var view by remember { mutableStateOf<VideoView?>(null) }
     var player by remember { mutableStateOf<MediaPlayer?>(null) }
     // The video's own shape, so there are no black bars (GoPro previews are 16:9 or 4:3 by lens mode)
@@ -147,6 +153,9 @@ fun InlineVideo(link: VideoLink, fromUtc: Long, toUtc: Long?, modifier: Modifier
     var error by remember { mutableStateOf<String?>(null) }
     val fromMs = ((link.videoTime(fromUtc) ?: 0.0) * 1000).toInt()
     val toMs = toUtc?.let { u -> link.videoTime(u)?.let { (it * 1000).toInt() } }
+    // The timeline spans what this clip is for: the corner, or the run
+    val endMs = toMs ?: endUtc?.let { u -> link.videoTime(u.coerceIn(link.startUtc, link.endUtc))?.let { (it * 1000).toInt() } }
+    var posMs by remember(fromMs) { mutableIntStateOf(fromMs) }
     LaunchedEffect(view, fromMs, toMs) {
         val v = view ?: return@LaunchedEffect
         v.seekTo(fromMs)
@@ -158,7 +167,7 @@ fun InlineVideo(link: VideoLink, fromUtc: Long, toUtc: Long?, modifier: Modifier
             if (v.isPlaying) {
                 val now = android.os.SystemClock.uptimeMillis()
                 val meas = v.currentPosition
-                if (toMs != null && meas >= toMs) { v.seekTo(fromMs); anchorPos = -1.0; continue }
+                if (toMs != null && meas >= toMs) { v.seekTo(fromMs); posMs = fromMs; anchorPos = -1.0; continue }
                 if (anchorPos < 0) { anchorPos = meas.toDouble(); anchorWall = now; lastMeas = meas }
                 var est = anchorPos + (now - anchorWall) * speed
                 if (meas != lastMeas) {
@@ -167,7 +176,8 @@ fun InlineVideo(link: VideoLink, fromUtc: Long, toUtc: Long?, modifier: Modifier
                     if (kotlin.math.abs(err) > 500) { anchorPos = meas.toDouble(); anchorWall = now; est = anchorPos }
                     else anchorPos += err * 0.2
                 }
-                atUtc(link.startUtc + est.toLong())
+                posMs = est.toInt()
+                onAt(link.startUtc + est.toLong())
             } else { anchorPos = -1.0; delay(80) }
         }
     }
@@ -179,7 +189,16 @@ fun InlineVideo(link: VideoLink, fromUtc: Long, toUtc: Long?, modifier: Modifier
         runCatching {
             view?.let { if (it.isPlaying) { it.pause(); playing = false } }
             mp.seekTo(ms.toLong(), MediaPlayer.SEEK_CLOSEST)
+            posMs = ms
         }
+    }
+    // Dragging the timeline: pause, show that frame, and tell the map and chart where it is
+    var lastSeek by remember { mutableIntStateOf(-1) }
+    fun scrubTo(ms: Int) {
+        view?.let { if (it.isPlaying) { it.pause(); playing = false } }
+        posMs = ms
+        if (kotlin.math.abs(ms - lastSeek) >= 30) { lastSeek = ms; runCatching { player?.seekTo(ms.toLong(), MediaPlayer.SEEK_CLOSEST) ?: view?.seekTo(ms) } }
+        onAt(link.startUtc + ms)
     }
     DisposableEffect(Unit) { onDispose { view?.stopPlayback() } }
     Box(modifier.aspectRatio(aspect).background(Color.Black).clickable {
@@ -199,7 +218,7 @@ fun InlineVideo(link: VideoLink, fromUtc: Long, toUtc: Long?, modifier: Modifier
         }, modifier = Modifier.fillMaxSize())
         // While a chart drives the video, keep the label out of the middle of the frame
         if (!playing) Text(if (seekMs != null) "▶  Tap to play from here" else if (toMs != null) "▶  Tap to play this corner" else "▶  Tap to play", color = Color.White, fontSize = if (seekMs != null) 13.sp else 16.sp,
-            modifier = Modifier.align(if (seekMs != null) Alignment.BottomCenter else Alignment.Center).padding(bottom = if (seekMs != null) 6.dp else 0.dp)
+            modifier = Modifier.align(if (seekMs != null) Alignment.BottomCenter else Alignment.Center).padding(bottom = if (seekMs != null) 36.dp else 0.dp)
                 .background(Color(0xA6000000)).padding(horizontal = 12.dp, vertical = 6.dp))
         // Full screen, with the course and a chart over the video
         if (onFullScreen != null) Text("⛶", color = Color.White, fontSize = 20.sp,
@@ -214,6 +233,27 @@ fun InlineVideo(link: VideoLink, fromUtc: Long, toUtc: Long?, modifier: Modifier
                 modifier = Modifier.background(if (speed == x) Color.White else Color(0xA6000000)).clickable {
                     speed = x; if (view?.isPlaying == true) applySpeed(player)
                 }.padding(horizontal = 8.dp, vertical = 4.dp))
+        }
+        if (endMs != null && endMs > fromMs && error == null) {
+            val span = (endMs - fromMs).toFloat()
+            Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(30.dp)
+                .pointerInput(fromMs, endMs) {
+                    fun at(x: Float) = fromMs + ((x - 14.dp.toPx()) / (size.width - 28.dp.toPx())).coerceIn(0f, 1f).times(span).toInt()
+                    awaitEachGesture {
+                        val down = awaitFirstDown(); down.consume(); scrubTo(at(down.position.x))
+                        drag(down.id) { c -> c.consume(); scrubTo(at(c.position.x)) }
+                    }
+                }) {
+                Canvas(Modifier.fillMaxSize()) {
+                    val pad = 14.dp.toPx(); val y = size.height - 11.dp.toPx(); val w = size.width - 2 * pad
+                    val f = ((posMs - fromMs) / span).coerceIn(0f, 1f)
+                    drawRect(Color(0x66000000), androidx.compose.ui.geometry.Offset(0f, y - 11.dp.toPx()), androidx.compose.ui.geometry.Size(size.width, size.height - (y - 11.dp.toPx())))
+                    drawLine(Color.White.copy(alpha = 0.35f), androidx.compose.ui.geometry.Offset(pad, y), androidx.compose.ui.geometry.Offset(pad + w, y), 4.dp.toPx())
+                    drawLine(Color.White, androidx.compose.ui.geometry.Offset(pad, y), androidx.compose.ui.geometry.Offset(pad + w * f, y), 4.dp.toPx())
+                    val o = androidx.compose.ui.geometry.Offset(pad + w * f, y)
+                    drawCircle(Color.Black, 8.dp.toPx(), o); drawCircle(Color.White, 6.dp.toPx(), o)
+                }
+            }
         }
         error?.let { Text(it, color = Amber, fontSize = 14.sp, modifier = Modifier.background(Color.Black).padding(10.dp)) }
     }

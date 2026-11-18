@@ -22,6 +22,10 @@ object Backup {
     private fun ext(ctx: Context) = ctx.getExternalFilesDir(null)!!
     private fun prefsDir(ctx: Context) = File(ctx.dataDir, "shared_prefs")
 
+    /** [s] with folder [old] moved to [new], both as written plainly and as JSON writes it ("\/" for "/"). */
+    fun movePath(s: String, old: String, new: String): String =
+        s.replace(old, new).replace(old.replace("/", "\\/"), new.replace("/", "\\/"))
+
     /** Bytes the backup would hold: everything, and of that the videos. */
     fun sizes(ctx: Context): Pair<Long, Long> {
         val all = filesToSave(ctx, true).sumOf { it.second.length() }
@@ -94,8 +98,8 @@ object Backup {
                 if (text && oldExt != null) {
                     // Saved paths point at the old app's folders: point them at this one's
                     var s = z.readBytes().toString(Charsets.UTF_8)
-                    oldExt?.takeIf { it.isNotEmpty() }?.let { s = s.replace(it, newExt) }
-                    oldFiles?.takeIf { it.isNotEmpty() }?.let { s = s.replace(it, newFiles) }
+                    oldExt?.takeIf { it.isNotEmpty() }?.let { s = movePath(s, it, newExt) }
+                    oldFiles?.takeIf { it.isNotEmpty() }?.let { s = movePath(s, it, newFiles) }
                     dest.writeText(s)
                 } else dest.outputStream().use { z.copyTo(it) }
                 n++

@@ -33,8 +33,8 @@ android {
         applicationId = if (legacy) "com.kimes.daq" else "com.kimes.debrief"
         minSdk = 29
         targetSdk = 35
-        versionCode = 23
-        versionName = "0.23"
+        versionCode = 25
+        versionName = "0.25"
     }
 
     buildTypes {

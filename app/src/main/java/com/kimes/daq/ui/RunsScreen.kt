@@ -408,7 +408,7 @@ private fun Overview(l: Loaded, runs: List<Run>, pen: Map<Int, Int>, open: (Int)
             val vids by Hub.videos.collectAsState()
             val ru0 = l.runS.firstOrNull { it.utc > 0 }?.utc
             val clip = ru0?.let { u -> vids.firstOrNull { u in it.startUtc..it.endUtc } }
-            if (clip != null && ru0 != null) InlineVideo(clip, ru0 - 2000, null, Modifier.fillMaxWidth(), onFullScreen = video) { videoUtc = it }
+            if (clip != null && ru0 != null) InlineVideo(clip, ru0 - 2000, null, Modifier.fillMaxWidth(), onFullScreen = video, endUtc = runEndUtc(l.runS)) { videoUtc = it }
             val p = pen[l.run.number] ?: 0
             Text(if (a.ref != null) "Run ${l.run.number} vs run ${a.ref.number}${bestTag(a.ref.number)}" else "Run ${l.run.number}", color = Dim, fontSize = 15.sp)
             Row(verticalAlignment = Alignment.Bottom) {
@@ -849,7 +849,7 @@ private fun Charts(l: Loaded, back: () -> Unit) {
                 FitButton(Modifier.align(Alignment.TopEnd)) { map.fit(runS.map { it.lat to it.lon }, 24f) }
             }
         },
-        video = if (clip != null && ru0 != null) { m -> InlineVideo(clip, ru0 - 2000, null, m,
+        video = if (clip != null && ru0 != null) { m -> InlineVideo(clip, ru0 - 2000, null, m, endUtc = runEndUtc(runS),
             seekUtc = chartCursor?.let { d -> a.dist.indices.minByOrNull { abs(a.dist[it] - d) } }?.let { runS.getOrNull(it) }?.utc?.takeIf { it > 0 }) { u ->
             runS.indices.minByOrNull { abs(runS[it].utc - u) }?.let { q -> played = a.dist.getOrNull(q) }
         } } else null,
@@ -1010,16 +1010,17 @@ private fun FullVideo(l: Loaded, clip: com.kimes.daq.gopro.VideoLink, ru0: Long,
 
     if (port) Column(Modifier.fillMaxSize().background(Color.Black)) {
         Box(Modifier.fillMaxWidth()) {
-            InlineVideo(clip, ru0 - 2000, null, Modifier.fillMaxWidth(), seekUtc = seekUtc) { videoUtc = it }
-            BackButton("Run ${l.run.number}", Modifier.align(Alignment.BottomStart).padding(8.dp).width(130.dp), height = 36) { back() }
+            InlineVideo(clip, ru0 - 2000, null, Modifier.fillMaxWidth(), seekUtc = seekUtc, endUtc = runEndUtc(runS)) { videoUtc = it }
+            BackButton("Run ${l.run.number}", Modifier.align(Alignment.TopStart).padding(8.dp).width(130.dp), height = 36) { back() }
         }
         course(Modifier.fillMaxWidth().weight(1f), withSize = false)
         chart(Modifier.fillMaxWidth(), 170.dp, withSize = false)
     } else Box(Modifier.fillMaxSize().background(Color.Black)) {
-        InlineVideo(clip, ru0 - 2000, null, Modifier.align(Alignment.Center).fillMaxHeight(), seekUtc = seekUtc) { videoUtc = it }
+        InlineVideo(clip, ru0 - 2000, null, Modifier.align(Alignment.Center).fillMaxHeight(), seekUtc = seekUtc, endUtc = runEndUtc(runS)) { videoUtc = it }
         BackButton("Run ${l.run.number}", Modifier.align(Alignment.TopStart).padding(12.dp).width(140.dp)) { back() }
-        course(Modifier.align(Alignment.BottomStart).padding(12.dp).size(width = courseSize.course.first.dp, height = courseSize.course.second.dp), withSize = true)
-        chart(Modifier.align(Alignment.BottomEnd).padding(12.dp).width(chartSize.chartW.dp), chartSize.chartH.dp, withSize = true)
+        // Above the video's timeline
+        course(Modifier.align(Alignment.BottomStart).padding(start = 12.dp, end = 12.dp, top = 12.dp, bottom = 42.dp).size(width = courseSize.course.first.dp, height = courseSize.course.second.dp), withSize = true)
+        chart(Modifier.align(Alignment.BottomEnd).padding(start = 12.dp, end = 12.dp, top = 12.dp, bottom = 42.dp).width(chartSize.chartW.dp), chartSize.chartH.dp, withSize = true)
     }
 }
 
@@ -1460,3 +1461,6 @@ private fun BackupRow(logging: Boolean) {
         }
     }
 }
+
+/** End of a run on the GPS clock plus a little after the finish, for a video timeline. */
+private fun runEndUtc(ss: List<Sample>): Long? = ss.lastOrNull { it.utc > 0 }?.utc?.plus(2000)
